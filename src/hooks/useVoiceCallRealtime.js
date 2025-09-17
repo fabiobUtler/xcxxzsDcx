@@ -20,7 +20,7 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
   const startCall = async () => {
     try {
       // Через Vite proxy: /api/realtime → ws://localhost:3001
-      wsRef.current = new WebSocket("ws://localhost:5173/api/realtime");
+      wsRef.current = new WebSocket(`${window.location.protocol === 'https:' ? 'wss://' : 'ws://'}${window.location.host}/api/realtime`);
 
       wsRef.current.onopen = async () => {
         console.log("✅ Соединение с сервером установлено");
