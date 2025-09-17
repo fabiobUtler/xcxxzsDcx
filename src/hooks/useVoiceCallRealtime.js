@@ -19,21 +19,16 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
 
   const startCall = async () => {
     try {
-      // Через Vite proxy: /api/realtime → ws://localhost:3001
-      wsRef.current = new WebSocket(`${window.location.protocol === 'https:' ? 'wss://' : 'ws://'}${window.location.host}/api/realtime`);
+      // 🔥 Используем правильный URL: wss://tg-callapp.com/api/realtime
+      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      const wsUrl = `${protocol}${window.location.host}/api/realtime`;
+      wsRef.current = new WebSocket(wsUrl);
 
+      console.log("📡 Попытка подключения к:", wsUrl);
+
+      // ✅ Все обработчики событий — сразу после создания WebSocket
       wsRef.current.onopen = async () => {
         console.log("✅ Соединение с сервером установлено");
-      
-            // Добавь эти логи!
-      wsRef.current.onerror = (err) => {
-        console.error("❌ Ошибка WebSocket (внутри startCall):", err);
-      };
-
-      wsRef.current.onclose = () => {
-        console.log("🔴 Соединение закрыто (возможно, ошибка)");
-      };
-
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -43,9 +38,9 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
             },
           });
 
-          audioContextRef.current = new AudioContext({
-            sampleRate: 24000,
-          });
+          audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+          await audioContextRef.current.resume(); // ⚠️ Важно для активации
+
           const source = audioContextRef.current.createMediaStreamSource(stream);
           const processor = audioContextRef.current.createScriptProcessor(2048, 1, 1);
           processorRef.current = processor;
@@ -77,6 +72,7 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log("📩 Получено от сервера:", data);
 
           if (data.type === "transcript") {
             addTranscript("You", data.text);
@@ -92,16 +88,16 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
             }
           }
         } catch (e) {
-          console.warn("Не удалось распарсить сообщение:", event.data);
+          console.warn("⚠️ Не удалось распарсить сообщение:", event.data);
         }
       };
 
       wsRef.current.onerror = (err) => {
-        console.error("WebSocket ошибка:", err);
+        console.error("❌ WebSocket ошибка:", err);
       };
 
       wsRef.current.onclose = () => {
-        console.log("Соединение закрыто");
+        console.log("🔴 Соединение закрыто");
         endCall();
       };
     } catch (err) {
@@ -112,7 +108,9 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
   const endCall = () => {
     processorRef.current?.disconnect();
     audioContextRef.current?.close().catch(console.warn);
-    wsRef.current?.close();
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
     setIsCalling(false);
     setTranscripts([]);
   };
