@@ -1,0 +1,18 @@
+# .gitattributes
+* text=auto
+
+# Избегаем изменений в node_modules
+node_modules/** -text -eol
+
+# JS/JSX/TS/TSX — как текст
+*.js text
+*.jsx text
+*.ts text
+*.tsx text
+
+# JSON без конвертации
+*.json text eol=lf
+
+# Lock-файлы — LF
+package-lock.json text eol=lf
+yarn.lock text eol=lf
