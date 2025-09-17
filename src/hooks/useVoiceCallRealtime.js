@@ -107,7 +107,9 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
 
   const endCall = () => {
     processorRef.current?.disconnect();
-    audioContextRef.current?.close().catch(console.warn);
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(console.warn);
+    }
     if (wsRef.current) {
       wsRef.current.close();
     }
