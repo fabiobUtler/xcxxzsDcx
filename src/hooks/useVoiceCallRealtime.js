@@ -26,10 +26,24 @@ export function useVoiceCallRealtime(serverUrl) {
           console.warn("⚠️ Пришёл текст, но не JSON");
         }
       } else {
-        const audioBuffer = await audioCtxRef.current.decodeAudioData(event.data.slice(0));
-        bufferQueue.current.push(audioBuffer);
-        if (!sourceRef.current) {
-          playNextBuffer();
+        try {
+          let arrayBuffer;
+          if (event.data instanceof Blob) {
+            arrayBuffer = await event.data.arrayBuffer();
+          } else if (event.data instanceof ArrayBuffer) {
+            arrayBuffer = event.data;
+          } else {
+            console.warn("⚠️ Пришёл неожиданный тип данных:", typeof event.data);
+            return;
+          }
+
+          const audioBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer);
+          bufferQueue.current.push(audioBuffer);
+          if (!sourceRef.current) {
+            playNextBuffer();
+          }
+        } catch (err) {
+          console.error("❌ Ошибка при обработке аудио:", err);
         }
       }
     };
