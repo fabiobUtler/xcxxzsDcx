@@ -1,4 +1,3 @@
-// src/hooks/useVoiceCallRealtime.js
 import { useState, useRef, useCallback } from "react";
 
 export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
@@ -19,14 +18,14 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
 
   const startCall = async () => {
     try {
-      // 🔥 Используем правильный URL: wss://tg-callapp.com/api/realtime
-      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
       const wsUrl = `${protocol}${window.location.host}/api/realtime`;
       wsRef.current = new WebSocket(wsUrl);
 
-      console.log("📡 Попытка подключения к:", wsUrl);
+      console.log("📡 Подключение к:", wsUrl);
 
-      // ✅ Все обработчики событий — сразу после создания WebSocket
+      wsRef.current.binaryType = "arraybuffer"; // ✅ важно для передачи бинарки
+
       wsRef.current.onopen = async () => {
         console.log("✅ Соединение с сервером установлено");
         try {
@@ -39,7 +38,7 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
           });
 
           audioContextRef.current = new AudioContext({ sampleRate: 24000 });
-          await audioContextRef.current.resume(); // ⚠️ Важно для активации
+          await audioContextRef.current.resume();
 
           const source = audioContextRef.current.createMediaStreamSource(stream);
           const processor = audioContextRef.current.createScriptProcessor(2048, 1, 1);
@@ -58,7 +57,7 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
             }
 
             if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(samples.buffer);
+              wsRef.current.send(samples.buffer); // 🔥 бинарка уходит как ArrayBuffer
             }
           };
 
@@ -72,7 +71,7 @@ export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log("📩 Получено от сервера:", data);
+          console.log("📩 Получено:", data);
 
           if (data.type === "transcript") {
             addTranscript("You", data.text);

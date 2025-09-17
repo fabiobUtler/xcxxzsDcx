@@ -2,10 +2,18 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const WebSocket = require("ws");
-import fetch from "node-fetch";
+
+import OpenAI from "openai";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+console.log("✅ .env файл загружен");
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error("❌ OPENAI_API_KEY не найден");
+  process.exit(1);
+}
 
 const PORT = process.env.PORT || 3001;
 
@@ -13,52 +21,91 @@ const wss = new WebSocket.Server({ port: PORT }, () => {
   console.log(`🟢 WebSocket сервер запущен на порту ${PORT}`);
 });
 
-wss.on("connection", (ws) => {
-  console.log("🟡 Клиент подключился");
+wss.on("connection", async (ws) => {
+  console.log("🟡 [WebSocket] Клиент подключился");
 
-  let audioChunks = [];
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  ws.on("message", async (data) => {
-    if (data instanceof ArrayBuffer) {
-      audioChunks.push(Buffer.from(data));
-      console.log("🎧 Получен кусок аудио:", Buffer.from(data).length);
-    } else {
-      console.log("⚠️ Получен текст:", data.toString());
-    }
-  });
+  try {
+    // 🔗 Подключение к OpenAI Realtime
+    const stream = await openai.beta.realtime.connect({
+      model: "gpt-4o-realtime-preview-2024-12-17",
+    });
 
-  ws.on("close", async () => {
-    console.log("🔴 Клиент отключился, отправляем аудио в OpenAI");
+    console.log("✅ Подключено к OpenAI Realtime");
 
-    if (audioChunks.length === 0) return;
+    // ⚙️ Сессия
+    stream.sendEvent("session.update", {
+      session: {
+        instructions: `
+          Ты — финансовый консультант. Отвечай кратко.
+          Факты:
+          - Инвестирую 5 лет в крипту и акции.
+          - Помогаю новичкам.
+        `,
+        voice: "alloy",
+        turn_detection: { type: "server_vad" },
+        input_audio_transcription: { enabled: true },
+      },
+    });
 
-    const audioBuffer = Buffer.concat(audioChunks);
+    // 🎙️ Распознанная речь
+    stream.on("content.audio_transcript", (event) => {
+      console.log("🎙️ Распознано:", event.transcript);
+      ws.send(JSON.stringify({ type: "transcript", text: event.transcript }));
+    });
 
-    try {
-      const resp = await fetch("https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/sdp",
-        },
-        body: audioBuffer,
-      });
+    // 🔊 Аудио-ответ
+    stream.on("content.audio", (event) => {
+      if (event.role === "assistant") {
+        const audioBase64 = Buffer.from(event.audio).toString("base64");
+        console.log("🔊 Ответ AI, длина:", audioBase64.length);
+        ws.send(
+          JSON.stringify({
+            type: "response",
+            text: event.transcript || "(аудио)",
+            audio: audioBase64,
+          })
+        );
+      }
+    });
 
-      const result = await resp.json();
-      console.log("✅ Ответ OpenAI:", result);
+    // 🎧 Приём аудио от клиента
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) {
+        const buffer = Buffer.from(data);
+        stream.sendEvent("input_audio_buffer.append", {
+          audio: buffer.toString("base64"), // ✅ base64 PCM16
+        });
+        console.log("🎧 Бинарное аудио отправлено в OpenAI:", buffer.length);
+      } else {
+        try {
+          const msg = JSON.parse(data.toString());
+          console.log("📩 Текстовое сообщение:", msg);
+        } catch {
+          console.log("⚠️ Получен текст:", data.toString());
+        }
+      }
+    });
 
-      ws.send(JSON.stringify({
-        type: "response",
-        text: result.text || "🤖 (ответ без текста)",
-      }));
+    ws.on("close", () => {
+      console.log("🔴 Клиент отключился");
+      stream.connection?.close();
+    });
 
-    } catch (err) {
-      console.error("❌ Ошибка при запросе в OpenAI:", err);
-      ws.send(JSON.stringify({
+    stream.on("error", (err) => {
+      console.error("❌ OpenAI ошибка:", err);
+      ws.send(JSON.stringify({ type: "error", message: "Ошибка AI", error: err.message }));
+    });
+  } catch (err) {
+    console.error("❌ Ошибка подключения к OpenAI:", err);
+    ws.send(
+      JSON.stringify({
         type: "error",
-        message: "Ошибка AI",
+        message: "Ошибка подключения к OpenAI",
         error: err.message,
-      }));
-    }
-  });
+      })
+    );
+    ws.close();
+  }
 });
