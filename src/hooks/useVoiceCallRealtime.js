@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-export default function useVoiceCallRealtime(serverUrl) {
+export function useVoiceCallRealtime(serverUrl) {
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
   const sourceRef = useRef(null);
@@ -8,13 +8,10 @@ export default function useVoiceCallRealtime(serverUrl) {
 
   useEffect(() => {
     const ws = new WebSocket(`${serverUrl}/api/realtime`);
-
-    ws.binaryType = "arraybuffer"; // ⚡ важно для аудио
+    ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
       console.log("✅ Подключение к серверу установлено");
-
-      // Создаем AudioContext (лучше при первом user gesture)
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
@@ -29,47 +26,31 @@ export default function useVoiceCallRealtime(serverUrl) {
           console.warn("⚠️ Пришёл текст, но не JSON");
         }
       } else {
-        // 🔊 Пришло аудио
         const audioBuffer = await audioCtxRef.current.decodeAudioData(event.data.slice(0));
         bufferQueue.current.push(audioBuffer);
-
         if (!sourceRef.current) {
           playNextBuffer();
         }
       }
     };
 
-    ws.onclose = () => {
-      console.log("🔴 Соединение закрыто");
-    };
-
-    ws.onerror = (err) => {
-      console.error("❌ Ошибка WebSocket", err);
-    };
+    ws.onclose = () => console.log("🔴 Соединение закрыто");
+    ws.onerror = (err) => console.error("❌ Ошибка WebSocket", err);
 
     wsRef.current = ws;
-
-    return () => {
-      ws.close();
-    };
+    return () => ws.close();
   }, [serverUrl]);
 
-  // Функция проигрывания очереди аудио
   const playNextBuffer = () => {
     if (bufferQueue.current.length === 0) {
       sourceRef.current = null;
       return;
     }
-
     const buffer = bufferQueue.current.shift();
     const source = audioCtxRef.current.createBufferSource();
     source.buffer = buffer;
     source.connect(audioCtxRef.current.destination);
-
-    source.onended = () => {
-      playNextBuffer();
-    };
-
+    source.onended = playNextBuffer;
     source.start();
     sourceRef.current = source;
   };
