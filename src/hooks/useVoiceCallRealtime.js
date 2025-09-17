@@ -1,125 +1,78 @@
-import { useState, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 
-export function useVoiceCallRealtime({ onTranscript, onAIResponse }) {
-  const [isCalling, setIsCalling] = useState(false);
-  const [transcripts, setTranscripts] = useState([]);
+export default function useVoiceCallRealtime(serverUrl) {
   const wsRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const processorRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const sourceRef = useRef(null);
+  const bufferQueue = useRef([]);
 
-  const addTranscript = useCallback(
-    (who, text) => {
-      const entry = { who, text };
-      setTranscripts((prev) => [...prev, entry]);
-      onTranscript?.(entry);
-    },
-    [onTranscript]
-  );
+  useEffect(() => {
+    const ws = new WebSocket(`${serverUrl}/api/realtime`);
 
-  const startCall = async () => {
-    try {
-      const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
-      const wsUrl = `${protocol}${window.location.host}/api/realtime`;
-      wsRef.current = new WebSocket(wsUrl);
+    ws.binaryType = "arraybuffer"; // ⚡ важно для аудио
 
-      console.log("📡 Подключение к:", wsUrl);
+    ws.onopen = () => {
+      console.log("✅ Подключение к серверу установлено");
 
-      wsRef.current.binaryType = "arraybuffer"; // ✅ важно для передачи бинарки
+      // Создаем AudioContext (лучше при первом user gesture)
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    };
 
-      wsRef.current.onopen = async () => {
-        console.log("✅ Соединение с сервером установлено");
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              sampleRate: 24000,
-            },
-          });
-
-          audioContextRef.current = new AudioContext({ sampleRate: 24000 });
-          await audioContextRef.current.resume();
-
-          const source = audioContextRef.current.createMediaStreamSource(stream);
-          const processor = audioContextRef.current.createScriptProcessor(2048, 1, 1);
-          processorRef.current = processor;
-
-          source.connect(processor);
-          processor.connect(audioContextRef.current.destination);
-
-          processor.onaudioprocess = (e) => {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const samples = new Int16Array(inputData.length);
-
-            for (let i = 0; i < inputData.length; i++) {
-              let s = Math.max(-1, Math.min(1, inputData[i]));
-              samples[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-            }
-
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(samples.buffer); // 🔥 бинарка уходит как ArrayBuffer
-            }
-          };
-
-          setIsCalling(true);
-        } catch (err) {
-          console.error("❌ Ошибка микрофона:", err);
-          alert("Не удалось получить доступ к микрофону");
-        }
-      };
-
-      wsRef.current.onmessage = (event) => {
+    ws.onmessage = async (event) => {
+      if (typeof event.data === "string") {
         try {
           const data = JSON.parse(event.data);
-          console.log("📩 Получено:", data);
-
-          if (data.type === "transcript") {
-            addTranscript("You", data.text);
-          }
-
-          if (data.type === "response") {
-            addTranscript("AI", data.text);
-            onAIResponse?.(data.text);
-
-            if (data.audio) {
-              const audio = new Audio(`data:audio/wav;base64,${data.audio}`);
-              audio.play().catch(console.error);
-            }
-          }
-        } catch (e) {
-          console.warn("⚠️ Не удалось распарсить сообщение:", event.data);
+          console.log("📩 Ответ (JSON):", data);
+        } catch {
+          console.warn("⚠️ Пришёл текст, но не JSON");
         }
-      };
+      } else {
+        // 🔊 Пришло аудио
+        const audioBuffer = await audioCtxRef.current.decodeAudioData(event.data.slice(0));
+        bufferQueue.current.push(audioBuffer);
 
-      wsRef.current.onerror = (err) => {
-        console.error("❌ WebSocket ошибка:", err);
-      };
+        if (!sourceRef.current) {
+          playNextBuffer();
+        }
+      }
+    };
 
-      wsRef.current.onclose = () => {
-        console.log("🔴 Соединение закрыто");
-        endCall();
-      };
-    } catch (err) {
-      console.error("Ошибка старта звонка:", err);
+    ws.onclose = () => {
+      console.log("🔴 Соединение закрыто");
+    };
+
+    ws.onerror = (err) => {
+      console.error("❌ Ошибка WebSocket", err);
+    };
+
+    wsRef.current = ws;
+
+    return () => {
+      ws.close();
+    };
+  }, [serverUrl]);
+
+  // Функция проигрывания очереди аудио
+  const playNextBuffer = () => {
+    if (bufferQueue.current.length === 0) {
+      sourceRef.current = null;
+      return;
     }
+
+    const buffer = bufferQueue.current.shift();
+    const source = audioCtxRef.current.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtxRef.current.destination);
+
+    source.onended = () => {
+      playNextBuffer();
+    };
+
+    source.start();
+    sourceRef.current = source;
   };
 
-  const endCall = () => {
-    processorRef.current?.disconnect();
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close().catch(console.warn);
-    }
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-    setIsCalling(false);
-    setTranscripts([]);
-  };
-
-  return {
-    isCalling,
-    transcripts,
-    startCall,
-    endCall,
-  };
+  return wsRef;
 }
