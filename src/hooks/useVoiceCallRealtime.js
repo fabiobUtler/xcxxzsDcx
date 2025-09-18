@@ -1,17 +1,18 @@
+// src/hooks/useVoiceCallRealtime.js
 import { useEffect, useRef } from "react";
 
-export function useVoiceCallRealtime(serverUrl) {
+export function useVoiceCallRealtime({ apiBase = "" }) {
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
   const sourceRef = useRef(null);
   const bufferQueue = useRef([]);
 
   useEffect(() => {
-    const ws = new WebSocket(`${serverUrl}/api/realtime`);
+    const ws = new WebSocket(`${apiBase}/api/realtime`.replace("http", "ws"));
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-      console.log("✅ Подключение к серверу установлено");
+      console.log("✅ Подключение к серверу установлено:", apiBase);
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
@@ -23,7 +24,7 @@ export function useVoiceCallRealtime(serverUrl) {
           const data = JSON.parse(event.data);
           console.log("📩 Ответ (JSON):", data);
         } catch {
-          console.warn("⚠️ Пришёл текст, но не JSON");
+          console.warn("⚠️ Пришёл текст, но не JSON:", event.data);
         }
       } else {
         try {
@@ -33,7 +34,7 @@ export function useVoiceCallRealtime(serverUrl) {
           } else if (event.data instanceof ArrayBuffer) {
             arrayBuffer = event.data;
           } else {
-            console.warn("⚠️ Пришёл неожиданный тип данных:", typeof event.data);
+            console.warn("⚠️ Неожиданный тип данных:", typeof event.data);
             return;
           }
 
@@ -53,7 +54,7 @@ export function useVoiceCallRealtime(serverUrl) {
 
     wsRef.current = ws;
     return () => ws.close();
-  }, [serverUrl]);
+  }, [apiBase]);
 
   const playNextBuffer = () => {
     if (bufferQueue.current.length === 0) {
